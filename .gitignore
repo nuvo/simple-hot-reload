@@ -1,2 +1,3 @@
 .cache/*
 .bash_history
+*.pid

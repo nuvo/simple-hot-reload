@@ -2,12 +2,63 @@ package main
 
 import (
   "fmt"
+  "bufio"
   "os"
   "log"
+  "strconv"
+  "syscall"
+  "strings"
 
   "github.com/pborman/getopt/v2"
   "github.com/fsnotify/fsnotify"
 )
+
+func readPidFile(pidFile string) int {
+  f, err := os.Open(pidFile)
+  defer f.Close()
+  if err != nil {
+    log.Println("WARNING: could not open pid file")
+    return -1
+  }
+  r := bufio.NewReader(f)
+  line, _ := r.ReadString('\n')
+  s := strings.TrimSuffix(line, "\n")
+  pid, err := strconv.Atoi(s)
+  if err != nil {
+    log.Println("WARNING: invalid pid file")
+    return -1
+  }
+  return pid
+}
+func MapPidArgs(pidStrings []string) []int {
+  var err error
+    pids := make([]int, len(pidStrings))
+    for i, pidString := range pidStrings {
+        pids[i], err = strconv.Atoi(pidString)
+        if err != nil {
+          panic(err)
+        }
+    }
+    return pids
+}
+func notifyProcess(pid int) {
+  p, err := os.FindProcess(pid)
+  if err != nil {
+    panic(err)
+  }
+  p.Signal(syscall.SIGHUP)
+}
+func notifyPids(pids []int) {
+  for _, pid := range pids {
+    notifyProcess(pid)
+  }
+}
+func notifyPidFiles(pidfiles []string) {
+  for _, pidFile := range pidfiles {
+    pid := readPidFile(pidFile)
+    notifyProcess(pid)
+  }
+}
 
 func main()  {
   optWatch := getopt.ListLong("watch", 'w', "", "Directory or file to watch")
@@ -33,10 +84,12 @@ func main()  {
     os.Exit(1)
   }
 
-  watchNotify(*optWatch, *optPid, *optPidFile)
+  pids := MapPidArgs(*optPid)
+
+  watchNotify(*optWatch, pids, *optPidFile)
 }
 
-func watchNotify(watches []string, pids []string, pidfiles []string) {
+func watchNotify(watches []string, pids []int, pidfiles []string) {
   watcher, err := fsnotify.NewWatcher()
   if err != nil {
     log.Fatal(err)
@@ -51,9 +104,8 @@ func watchNotify(watches []string, pids []string, pidfiles []string) {
         if !ok {
           return
         }
-        for _, pid := range pids {
-          fmt.Printf("sending SIGHUP to %s\n", pid)
-        }
+        notifyPids(pids)
+        notifyPidFiles(pidfiles)
       case err, ok := <-watcher.Errors:
         if !ok {
           return
